@@ -19,9 +19,13 @@ struct Bullet {
 };
 
 struct Asteroid {
+  bool active;
   Vector2 pos;
   Vector2 vel;
-  float radius;
+  float angle;
+  float rotSpeed;
+  int sizeLevel;
+  int typeId;
 };
 
 static Vector2 RotatePoint(Vector2 p, float angle) {
@@ -67,6 +71,40 @@ static void DrawPolylineOpen(const Vector2* points, int count, Vector2 offset,
   }
 }
 
+static float RandRange(float min, float max) {
+  float t = GetRandomValue(0, 10000) / 10000.0f;
+  return min + (max - min) * t;
+}
+
+static float GetAsteroidScale(int sizeLevel) {
+  if (sizeLevel <= 0) return 0.35f * 2.0f;
+  if (sizeLevel == 1) return 0.6f * 2.0f;
+  return 1.0f * 2.0f;
+}
+
+static float GetAsteroidRadius(int sizeLevel) {
+  const float baseRadius = 18.0f;
+  return baseRadius * GetAsteroidScale(sizeLevel);
+}
+
+static int SpawnAsteroid(Asteroid* asteroids, int maxAsteroids, Vector2 pos,
+                         Vector2 vel, int sizeLevel, int typeId, float angle,
+                         float rotSpeed) {
+  for (int i = 0; i < maxAsteroids; ++i) {
+    if (!asteroids[i].active) {
+      asteroids[i].active = true;
+      asteroids[i].pos = pos;
+      asteroids[i].vel = vel;
+      asteroids[i].sizeLevel = sizeLevel;
+      asteroids[i].typeId = typeId;
+      asteroids[i].angle = angle;
+      asteroids[i].rotSpeed = rotSpeed;
+      return i;
+    }
+  }
+  return -1;
+}
+
 int main() {
   const int screenWidth = 960;
   const int screenHeight = 540;
@@ -88,6 +126,13 @@ int main() {
   const float bulletLength = 8.0f;
   const float fireInterval = 0.15f;
   float fireCooldown = 0.0f;
+  const int MAX_ASTEROIDS = 12;
+  const int startAsteroids = 5;
+  const float shipRadius = 12.0f * shipScale;
+  const float bulletRadius = 2.0f;
+  const float spawnSafeRadius = 140.0f;
+  int score = 0;
+  bool shipHitThisFrame = false;
 
   Bullet bullets[MAX_BULLETS];
   for (int i = 0; i < MAX_BULLETS; ++i) {
@@ -95,6 +140,17 @@ int main() {
     bullets[i].pos = {0.0f, 0.0f};
     bullets[i].vel = {0.0f, 0.0f};
     bullets[i].life = 0.0f;
+  }
+
+  Asteroid asteroids[MAX_ASTEROIDS];
+  for (int i = 0; i < MAX_ASTEROIDS; ++i) {
+    asteroids[i].active = false;
+    asteroids[i].pos = {0.0f, 0.0f};
+    asteroids[i].vel = {0.0f, 0.0f};
+    asteroids[i].angle = 0.0f;
+    asteroids[i].rotSpeed = 0.0f;
+    asteroids[i].sizeLevel = 0;
+    asteroids[i].typeId = 0;
   }
 
   const Vector2 shipShape[] = {
@@ -109,8 +165,46 @@ int main() {
       {-16.0f, 0.0f}, {-8.0f, -6.0f},
   };
 
+  const Vector2 asteroidShape0[] = {
+      {-12.0f, -8.0f}, {-4.0f, -14.0f}, {6.0f, -10.0f}, {12.0f, -2.0f},
+      {8.0f, 10.0f},   {-2.0f, 12.0f},  {-10.0f, 6.0f}, {-14.0f, -2.0f},
+  };
+  const Vector2 asteroidShape1[] = {
+      {-10.0f, -12.0f}, {2.0f, -14.0f}, {12.0f, -6.0f}, {10.0f, 4.0f},
+      {4.0f, 12.0f},    {-6.0f, 14.0f}, {-12.0f, 6.0f}, {-14.0f, -2.0f},
+  };
+  const Vector2 asteroidShape2[] = {
+      {-8.0f, -14.0f}, {6.0f, -12.0f}, {14.0f, -4.0f}, {12.0f, 6.0f},
+      {4.0f, 14.0f},   {-6.0f, 12.0f}, {-12.0f, 4.0f}, {-12.0f, -6.0f},
+  };
+  const int asteroidShape0Count =
+      sizeof(asteroidShape0) / sizeof(asteroidShape0[0]);
+  const int asteroidShape1Count =
+      sizeof(asteroidShape1) / sizeof(asteroidShape1[0]);
+  const int asteroidShape2Count =
+      sizeof(asteroidShape2) / sizeof(asteroidShape2[0]);
+
+  for (int i = 0; i < startAsteroids; ++i) {
+    Vector2 pos = {0.0f, 0.0f};
+    for (int tries = 0; tries < 50; ++tries) {
+      pos.x = RandRange(0.0f, (float)screenWidth);
+      pos.y = RandRange(0.0f, (float)screenHeight);
+      float dx = pos.x - ship.pos.x;
+      float dy = pos.y - ship.pos.y;
+      if (dx * dx + dy * dy > spawnSafeRadius * spawnSafeRadius) break;
+    }
+    float dirAngle = RandRange(0.0f, 2.0f * PI);
+    float speed = RandRange(30.0f, 80.0f);
+    Vector2 vel = {cosf(dirAngle) * speed, sinf(dirAngle) * speed};
+    float rotSpeed = RandRange(-1.5f, 1.5f);
+    int typeId = GetRandomValue(0, 2);
+    SpawnAsteroid(asteroids, MAX_ASTEROIDS, pos, vel, 2, typeId,
+                  RandRange(0.0f, 2.0f * PI), rotSpeed);
+  }
+
   while (!WindowShouldClose()) {
     float dt = GetFrameTime();
+    shipHitThisFrame = false;
 
     float turn = 0.0f;
     if (IsKeyDown(KEY_LEFT)) turn -= 1.0f;
@@ -160,8 +254,81 @@ int main() {
       if (bullets[i].life <= 0.0f) bullets[i].active = false;
     }
 
+    for (int i = 0; i < MAX_ASTEROIDS; ++i) {
+      if (!asteroids[i].active) continue;
+      asteroids[i].pos.x += asteroids[i].vel.x * dt;
+      asteroids[i].pos.y += asteroids[i].vel.y * dt;
+      asteroids[i].pos = WrapPosition(asteroids[i].pos, (float)screenWidth,
+                                      (float)screenHeight);
+      asteroids[i].angle += asteroids[i].rotSpeed * dt;
+    }
+
+    for (int i = 0; i < MAX_BULLETS; ++i) {
+      if (!bullets[i].active) continue;
+      for (int a = 0; a < MAX_ASTEROIDS; ++a) {
+        if (!asteroids[a].active) continue;
+        float radius = GetAsteroidRadius(asteroids[a].sizeLevel);
+        float dx = bullets[i].pos.x - asteroids[a].pos.x;
+        float dy = bullets[i].pos.y - asteroids[a].pos.y;
+        float hitDist = radius + bulletRadius;
+        if (dx * dx + dy * dy <= hitDist * hitDist) {
+          Asteroid parent = asteroids[a];
+          bullets[i].active = false;
+          asteroids[a].active = false;
+          if (parent.sizeLevel > 0) {
+            int newSize = parent.sizeLevel - 1;
+            float splitAngle = RandRange(0.0f, 2.0f * PI);
+            float splitSpeed = RandRange(50.0f, 90.0f);
+            Vector2 vel1 = {parent.vel.x + cosf(splitAngle) * splitSpeed,
+                            parent.vel.y + sinf(splitAngle) * splitSpeed};
+            Vector2 vel2 = {
+                parent.vel.x + cosf(splitAngle + PI / 2.0f) * splitSpeed,
+                parent.vel.y + sinf(splitAngle + PI / 2.0f) * splitSpeed};
+            SpawnAsteroid(asteroids, MAX_ASTEROIDS, parent.pos, vel1, newSize,
+                          GetRandomValue(0, 2), RandRange(0.0f, 2.0f * PI),
+                          RandRange(-2.0f, 2.0f));
+            SpawnAsteroid(asteroids, MAX_ASTEROIDS, parent.pos, vel2, newSize,
+                          GetRandomValue(0, 2), RandRange(0.0f, 2.0f * PI),
+                          RandRange(-2.0f, 2.0f));
+          }
+          score += 10;
+          break;
+        }
+      }
+    }
+
+    for (int a = 0; a < MAX_ASTEROIDS; ++a) {
+      if (!asteroids[a].active) continue;
+      float radius = GetAsteroidRadius(asteroids[a].sizeLevel);
+      float dx = ship.pos.x - asteroids[a].pos.x;
+      float dy = ship.pos.y - asteroids[a].pos.y;
+      float hitDist = radius + shipRadius;
+      if (dx * dx + dy * dy <= hitDist * hitDist) {
+        shipHitThisFrame = true;
+        ship.pos = {(float)screenWidth * 0.5f, (float)screenHeight * 0.5f};
+        ship.vel = {0.0f, 0.0f};
+        break;
+      }
+    }
+
     BeginDrawing();
     ClearBackground(BLACK);
+
+    for (int i = 0; i < MAX_ASTEROIDS; ++i) {
+      if (!asteroids[i].active) continue;
+      const Vector2* shape = asteroidShape0;
+      int shapeCount = asteroidShape0Count;
+      if (asteroids[i].typeId == 1) {
+        shape = asteroidShape1;
+        shapeCount = asteroidShape1Count;
+      } else if (asteroids[i].typeId == 2) {
+        shape = asteroidShape2;
+        shapeCount = asteroidShape2Count;
+      }
+      float scale = GetAsteroidScale(asteroids[i].sizeLevel);
+      DrawPolylineClosed(shape, shapeCount, asteroids[i].pos,
+                         asteroids[i].angle, scale, RAYWHITE);
+    }
 
     for (int i = 0; i < MAX_BULLETS; ++i) {
       if (!bullets[i].active) continue;
@@ -183,6 +350,11 @@ int main() {
     if (thrusting) {
       DrawPolylineOpen(flameShape, 5, ship.pos, ship.angle, shipScale,
                        RAYWHITE);
+    }
+
+    DrawText(TextFormat("score: %d", score), 10, 10, 20, RAYWHITE);
+    if (shipHitThisFrame) {
+      DrawText("ship hit!", 10, 34, 20, RAYWHITE);
     }
 
     EndDrawing();
