@@ -12,6 +12,7 @@ struct Ship {
 };
 
 struct Bullet {
+  bool active;
   Vector2 pos;
   Vector2 vel;
   float life;
@@ -81,6 +82,20 @@ int main() {
   ship.thrustPower = 400.0f;
   ship.damping = 1.5f;
   const float shipScale = 1.5f;
+  const int MAX_BULLETS = 16;
+  const float bulletSpeed = 420.0f;
+  const float bulletLife = 1.2f;
+  const float bulletLength = 8.0f;
+  const float fireInterval = 0.15f;
+  float fireCooldown = 0.0f;
+
+  Bullet bullets[MAX_BULLETS];
+  for (int i = 0; i < MAX_BULLETS; ++i) {
+    bullets[i].active = false;
+    bullets[i].pos = {0.0f, 0.0f};
+    bullets[i].vel = {0.0f, 0.0f};
+    bullets[i].life = 0.0f;
+  }
 
   const Vector2 shipShape[] = {
       {12.0f, 0.0f},
@@ -109,6 +124,25 @@ int main() {
       ship.vel.y += forward.y * ship.thrustPower * dt;
     }
 
+    if (fireCooldown > 0.0f) fireCooldown -= dt;
+    if (IsKeyDown(KEY_SPACE) && fireCooldown <= 0.0f) {
+      for (int i = 0; i < MAX_BULLETS; ++i) {
+        if (!bullets[i].active) {
+          Vector2 noseLocal = {shipShape[0].x * shipScale,
+                               shipShape[0].y * shipScale};
+          Vector2 noseOffset = RotatePoint(noseLocal, ship.angle);
+          bullets[i].active = true;
+          bullets[i].pos = {ship.pos.x + noseOffset.x,
+                            ship.pos.y + noseOffset.y};
+          bullets[i].vel = {ship.vel.x + forward.x * bulletSpeed,
+                            ship.vel.y + forward.y * bulletSpeed};
+          bullets[i].life = bulletLife;
+          fireCooldown = fireInterval;
+          break;
+        }
+      }
+    }
+
     ship.vel.x -= ship.vel.x * ship.damping * dt;
     ship.vel.y -= ship.vel.y * ship.damping * dt;
 
@@ -116,8 +150,34 @@ int main() {
     ship.pos.y += ship.vel.y * dt;
     ship.pos = WrapPosition(ship.pos, (float)screenWidth, (float)screenHeight);
 
+    for (int i = 0; i < MAX_BULLETS; ++i) {
+      if (!bullets[i].active) continue;
+      bullets[i].pos.x += bullets[i].vel.x * dt;
+      bullets[i].pos.y += bullets[i].vel.y * dt;
+      bullets[i].pos =
+          WrapPosition(bullets[i].pos, (float)screenWidth, (float)screenHeight);
+      bullets[i].life -= dt;
+      if (bullets[i].life <= 0.0f) bullets[i].active = false;
+    }
+
     BeginDrawing();
     ClearBackground(BLACK);
+
+    for (int i = 0; i < MAX_BULLETS; ++i) {
+      if (!bullets[i].active) continue;
+      float speed = sqrtf(bullets[i].vel.x * bullets[i].vel.x +
+                          bullets[i].vel.y * bullets[i].vel.y);
+      Vector2 dir = {1.0f, 0.0f};
+      if (speed > 0.001f) {
+        dir.x = bullets[i].vel.x / speed;
+        dir.y = bullets[i].vel.y / speed;
+      }
+      Vector2 tail = {bullets[i].pos.x - dir.x * bulletLength * 0.5f,
+                      bullets[i].pos.y - dir.y * bulletLength * 0.5f};
+      Vector2 head = {bullets[i].pos.x + dir.x * bulletLength * 0.5f,
+                      bullets[i].pos.y + dir.y * bulletLength * 0.5f};
+      DrawLineV(tail, head, RAYWHITE);
+    }
 
     DrawPolylineClosed(shipShape, 4, ship.pos, ship.angle, shipScale, RAYWHITE);
     if (thrusting) {
