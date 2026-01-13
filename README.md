@@ -4,7 +4,6 @@
 
 This repository contains the source code for my Blasteroids clone. If you are
 coming from YouTube, this is the project from the video where I build the game.
-By the time you read this, the video is already out.
 
 ## Build & Run
 
