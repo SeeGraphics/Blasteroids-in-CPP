@@ -2,6 +2,8 @@
 
 #include "raylib.h"
 
+enum GameState { Playing, GameOver };
+
 struct Ship {
   Vector2 pos;
   Vector2 vel;
@@ -131,8 +133,11 @@ int main() {
   const float shipRadius = 12.0f * shipScale;
   const float bulletRadius = 2.0f;
   const float spawnSafeRadius = 140.0f;
+  const float invulnDuration = 1.5f;
+  int lives = 3;
   int score = 0;
-  bool shipHitThisFrame = false;
+  GameState state = Playing;
+  float invulnTimer = 0.0f;
 
   Bullet bullets[MAX_BULLETS];
   for (int i = 0; i < MAX_BULLETS; ++i) {
@@ -164,6 +169,9 @@ int main() {
       {-8.0f, -6.0f}, {-4.0f, 0.0f},  {-8.0f, 6.0f},
       {-16.0f, 0.0f}, {-8.0f, -6.0f},
   };
+  const float lifeIconScale = shipScale * 0.8f;
+  const float lifeIconSpacing = 22.0f;
+  const Vector2 lifeIconStart = {12.0f, 20.0f};
 
   const Vector2 asteroidShape0[] = {
       {-12.0f, -8.0f}, {-4.0f, -14.0f}, {6.0f, -10.0f}, {12.0f, -2.0f},
@@ -204,7 +212,84 @@ int main() {
 
   while (!WindowShouldClose()) {
     float dt = GetFrameTime();
-    shipHitThisFrame = false;
+
+    if (state == GameOver && IsKeyPressed(KEY_R)) {
+      lives = 3;
+      score = 0;
+      invulnTimer = 0.0f;
+      state = Playing;
+      fireCooldown = 0.0f;
+      ship.pos = {(float)screenWidth * 0.5f, (float)screenHeight * 0.5f};
+      ship.vel = {0.0f, 0.0f};
+      ship.angle = -PI / 2.0f;
+
+      for (int i = 0; i < MAX_BULLETS; ++i) {
+        bullets[i].active = false;
+        bullets[i].pos = {0.0f, 0.0f};
+        bullets[i].vel = {0.0f, 0.0f};
+        bullets[i].life = 0.0f;
+      }
+
+      for (int i = 0; i < MAX_ASTEROIDS; ++i) {
+        asteroids[i].active = false;
+        asteroids[i].pos = {0.0f, 0.0f};
+        asteroids[i].vel = {0.0f, 0.0f};
+        asteroids[i].angle = 0.0f;
+        asteroids[i].rotSpeed = 0.0f;
+        asteroids[i].sizeLevel = 0;
+        asteroids[i].typeId = 0;
+      }
+
+      for (int i = 0; i < startAsteroids; ++i) {
+        Vector2 pos = {0.0f, 0.0f};
+        for (int tries = 0; tries < 50; ++tries) {
+          pos.x = RandRange(0.0f, (float)screenWidth);
+          pos.y = RandRange(0.0f, (float)screenHeight);
+          float dx = pos.x - ship.pos.x;
+          float dy = pos.y - ship.pos.y;
+          if (dx * dx + dy * dy > spawnSafeRadius * spawnSafeRadius) break;
+        }
+        float dirAngle = RandRange(0.0f, 2.0f * PI);
+        float speed = RandRange(30.0f, 80.0f);
+        Vector2 vel = {cosf(dirAngle) * speed, sinf(dirAngle) * speed};
+        float rotSpeed = RandRange(-1.5f, 1.5f);
+        int typeId = GetRandomValue(0, 2);
+        SpawnAsteroid(asteroids, MAX_ASTEROIDS, pos, vel, 2, typeId,
+                      RandRange(0.0f, 2.0f * PI), rotSpeed);
+      }
+    }
+
+    if (state == GameOver) {
+      BeginDrawing();
+      ClearBackground(BLACK);
+
+      for (int i = 0; i < lives; ++i) {
+        Vector2 iconPos = {lifeIconStart.x + i * lifeIconSpacing,
+                           lifeIconStart.y};
+        DrawPolylineClosed(shipShape, 4, iconPos, -PI / 2.0f, lifeIconScale,
+                           RAYWHITE);
+      }
+      int scoreWidth = MeasureText(TextFormat("score: %d", score), 20);
+      DrawText(TextFormat("score: %d", score), screenWidth - scoreWidth - 10,
+               10, 20, RAYWHITE);
+
+      const char* gameOverText = "GAME OVER";
+      int gameOverWidth = MeasureText(gameOverText, 40);
+      DrawText(gameOverText, screenWidth / 2 - gameOverWidth / 2,
+               screenHeight / 2 - 30, 40, RAYWHITE);
+      const char* restartText = "Press R to Restart";
+      int restartWidth = MeasureText(restartText, 20);
+      DrawText(restartText, screenWidth / 2 - restartWidth / 2,
+               screenHeight / 2 + 20, 20, RAYWHITE);
+
+      EndDrawing();
+      continue;
+    }
+
+    if (invulnTimer > 0.0f) {
+      invulnTimer -= dt;
+      if (invulnTimer < 0.0f) invulnTimer = 0.0f;
+    }
 
     float turn = 0.0f;
     if (IsKeyDown(KEY_LEFT)) turn -= 1.0f;
@@ -304,9 +389,24 @@ int main() {
       float dy = ship.pos.y - asteroids[a].pos.y;
       float hitDist = radius + shipRadius;
       if (dx * dx + dy * dy <= hitDist * hitDist) {
-        shipHitThisFrame = true;
-        ship.pos = {(float)screenWidth * 0.5f, (float)screenHeight * 0.5f};
-        ship.vel = {0.0f, 0.0f};
+        if (invulnTimer <= 0.0f && state == Playing) {
+          lives -= 1;
+          invulnTimer = invulnDuration;
+          if (lives <= 0) {
+            state = GameOver;
+            ship.pos = {(float)screenWidth * 0.5f, (float)screenHeight * 0.5f};
+            ship.vel = {0.0f, 0.0f};
+            for (int i = 0; i < MAX_ASTEROIDS; ++i) {
+              asteroids[i].active = false;
+              asteroids[i].pos = {0.0f, 0.0f};
+              asteroids[i].vel = {0.0f, 0.0f};
+              asteroids[i].angle = 0.0f;
+              asteroids[i].rotSpeed = 0.0f;
+              asteroids[i].sizeLevel = 0;
+              asteroids[i].typeId = 0;
+            }
+          }
+        }
         break;
       }
     }
@@ -346,16 +446,26 @@ int main() {
       DrawLineV(tail, head, RAYWHITE);
     }
 
-    DrawPolylineClosed(shipShape, 4, ship.pos, ship.angle, shipScale, RAYWHITE);
-    if (thrusting) {
-      DrawPolylineOpen(flameShape, 5, ship.pos, ship.angle, shipScale,
-                       RAYWHITE);
+    bool drawShip =
+        (invulnTimer <= 0.0f) || (((int)(invulnTimer * 10.0f)) % 2 == 0);
+    if (drawShip) {
+      DrawPolylineClosed(shipShape, 4, ship.pos, ship.angle, shipScale,
+                         RAYWHITE);
+      if (thrusting) {
+        DrawPolylineOpen(flameShape, 5, ship.pos, ship.angle, shipScale,
+                         RAYWHITE);
+      }
     }
 
-    DrawText(TextFormat("score: %d", score), 10, 10, 20, RAYWHITE);
-    if (shipHitThisFrame) {
-      DrawText("ship hit!", 10, 34, 20, RAYWHITE);
+    for (int i = 0; i < lives; ++i) {
+      Vector2 iconPos = {lifeIconStart.x + i * lifeIconSpacing,
+                         lifeIconStart.y};
+      DrawPolylineClosed(shipShape, 4, iconPos, -PI / 2.0f, lifeIconScale,
+                         RAYWHITE);
     }
+    int scoreWidth = MeasureText(TextFormat("score: %d", score), 20);
+    DrawText(TextFormat("score: %d", score), screenWidth - scoreWidth - 10, 10,
+             20, RAYWHITE);
 
     EndDrawing();
   }
